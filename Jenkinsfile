@@ -3,298 +3,313 @@ pipeline {
     agent any
 
     options {
-        skipDefaultCheckout(true)
         timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        skipDefaultCheckout(true)
     }
 
     parameters {
         choice(
-            name: 'BUILD_MODE',
-            choices: ['FULL', 'TEST_ONLY'],
-            description: 'FULL builds, pushes and deploys. TEST_ONLY builds and tests without pushing or deploying.'
+            name: 'RELEASE_MODE',
+            choices: ['STABLE', 'FAULTY_ROLLBACK_TEST'],
+            description: 'Choose a stable deployment or test rollback recovery.'
+        )
+
+        booleanParam(
+            name: 'DEPLOY_TO_KUBERNETES',
+            defaultValue: true,
+            description: 'Deploy after the Docker image is pushed successfully.'
         )
     }
 
     environment {
-        IMAGE_NAME = 'bbhavanasree/ewaste-portal'
+        DOCKERHUB_USERNAME = 'bbhavanasree'
+        IMAGE_NAME = 'ewaste-portal'
+        DOCKER_CREDENTIALS_ID = 'dockerhub-creds'
+        KUBECONFIG_CREDENTIALS_ID = 'kubernetes-creds'
+
         K8S_DEPLOYMENT = 'ewaste-portal-deployment'
         K8S_CONTAINER = 'ewaste-portal'
+        K8S_SERVICE = 'ewaste-portal-service'
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
+                bat 'git log -1 --oneline'
             }
         }
 
-        stage('Validate HTML') {
-            steps {
-                powershell '''
-                    $ErrorActionPreference = "Stop"
-
-                    if (!(Test-Path "index.html")) {
-                        throw "index.html not found"
+        stage('Parallel Validation') {
+            parallel {
+                stage('HTML Content Test') {
+                    steps {
+                        bat 'findstr /C:"Central Civic Collection Centre" index.html'
+                        bat 'findstr /C:"Successfully recycled" index.html'
+                        bat 'findstr /C:"scheduleForm" index.html'
                     }
+                }
 
-                    $html = Get-Content "index.html" -Raw
-
-                    if ($html -notmatch '(?i)<html') {
-                        throw "HTML validation failed"
+                stage('Deployment Manifest Test') {
+                    steps {
+                        bat 'findstr /C:"kind: Deployment" deployment.yaml'
+                        bat 'findstr /C:"kind: Service" deployment.yaml'
+                        bat 'findstr /C:"readinessProbe" deployment.yaml'
+                        bat 'findstr /C:"ewaste-portal-deployment" deployment.yaml'
+                        bat 'findstr /C:"ewaste-portal-service" deployment.yaml'
                     }
-
-                    Write-Host "HTML validation successful"
-                '''
-            }
-        }
-
-        stage('Validate Kubernetes YAML') {
-            steps {
-                powershell '''
-                    $ErrorActionPreference = "Stop"
-
-                    if (!(Test-Path "deployment.yaml")) {
-                        throw "deployment.yaml not found"
-                    }
-
-                    $yaml = Get-Content "deployment.yaml" -Raw
-
-                    if ($yaml -notmatch '(?m)^kind:\\s*Deployment\\s*$') {
-                        throw "Deployment resource missing"
-                    }
-
-                    if ($yaml -notmatch '(?m)^kind:\\s*Service\\s*$') {
-                        throw "Service resource missing"
-                    }
-
-                    if ($yaml -notmatch 'ewaste-portal') {
-                        throw "Expected E-Waste portal name not found"
-                    }
-
-                    Write-Host "Local Kubernetes manifest checks passed"
-                '''
-            }
-        }
-
-        stage('Archive Artifacts') {
-            steps {
-                archiveArtifacts(
-                    artifacts: 'index.html,Dockerfile,deployment.yaml,Jenkinsfile',
-                    allowEmptyArchive: true
-                )
+                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                bat '''
-                    @echo off
-                    docker build -t %IMAGE_NAME%:%BUILD_NUMBER% .
-                    if errorlevel 1 exit /b 1
+                script {
+                    env.IMAGE_TAG = "v${env.BUILD_NUMBER}"
 
-                    docker tag %IMAGE_NAME%:%BUILD_NUMBER% %IMAGE_NAME%:latest
-                    if errorlevel 1 exit /b 1
-                '''
-            }
-        }
+                    bat "docker build -t ${env.DOCKERHUB_USERNAME}/${env.IMAGE_NAME}:${env.IMAGE_TAG} ."
 
-        stage('Test Docker Image') {
-            steps {
-                powershell '''
-                    $ErrorActionPreference = "Stop"
-
-                    $containerName = "ewaste-test-$env:BUILD_NUMBER"
-                    $image = "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
-
-                    docker rm -f $containerName 2>$null | Out-Null
-
-                    docker run -d --name $containerName -p 18080:80 $image
-                    if ($LASTEXITCODE -ne 0) {
-                        throw "Docker container failed to start"
-                    }
-
-                    try {
-                        $passed = $false
-
-                        for ($i = 0; $i -lt 10; $i++) {
-                            try {
-                                $response = Invoke-WebRequest `
-                                    -Uri "http://127.0.0.1:18080" `
-                                    -UseBasicParsing `
-                                    -TimeoutSec 3
-
-                                if ($response.StatusCode -eq 200) {
-                                    $passed = $true
-                                    break
-                                }
-                            }
-                            catch {
-                                Start-Sleep -Seconds 2
-                            }
-                        }
-
-                        if (!$passed) {
-                            docker logs $containerName
-                            throw "Website HTTP test failed"
-                        }
-
-                        Write-Host "Website HTTP test passed: HTTP 200"
-                    }
-                    finally {
-                        docker rm -f $containerName 2>$null | Out-Null
-                    }
-                '''
-            }
-        }
-
-        stage('Push to Docker Hub') {
-            when {
-                expression { params.BUILD_MODE == 'FULL' }
-            }
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-creds',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )
-                ]) {
-                    powershell '''
-                        $ErrorActionPreference = "Stop"
-
-                        if ($env:DOCKER_USER -ne "bbhavanasree") {
-                            throw "Unexpected Docker Hub username in Jenkins credential"
-                        }
-
-                        if ([string]::IsNullOrWhiteSpace($env:DOCKER_PASS)) {
-                            throw "Docker Hub secret is empty"
-                        }
-
-                        # Use stdin so the secret is not included in command arguments.
-                        $psi = New-Object System.Diagnostics.ProcessStartInfo
-                        $psi.FileName = "docker.exe"
-                        $psi.Arguments = "login --username $env:DOCKER_USER --password-stdin"
-                        $psi.UseShellExecute = $false
-                        $psi.RedirectStandardInput = $true
-                        $psi.RedirectStandardOutput = $true
-                        $psi.RedirectStandardError = $true
-                        $psi.CreateNoWindow = $true
-
-                        $process = New-Object System.Diagnostics.Process
-                        $process.StartInfo = $psi
-
-                        [void]$process.Start()
-
-                        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-                        $stderrTask = $process.StandardError.ReadToEndAsync()
-
-                        $process.StandardInput.WriteLine($env:DOCKER_PASS)
-                        $process.StandardInput.Close()
-                        $process.WaitForExit()
-
-                        $stdout = $stdoutTask.Result
-                        $stderr = $stderrTask.Result
-
-                        if ($process.ExitCode -ne 0) {
-                            Write-Host "Docker Hub rejected the login. The token value itself cannot be corrected by Jenkinsfile code."
-                            if ($stdout) { Write-Host $stdout }
-                            if ($stderr) { Write-Host $stderr }
-                            throw "Docker Hub login failed"
-                        }
-
-                        Write-Host "Docker Hub login successful"
-
-                        docker push "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Failed to push build-number image"
-                        }
-
-                        docker push "$env:IMAGE_NAME`:latest"
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Failed to push latest image"
-                        }
-                    '''
+                    bat "docker image inspect ${env.DOCKERHUB_USERNAME}/${env.IMAGE_NAME}:${env.IMAGE_TAG} > image-inspect.json"
                 }
             }
         }
 
-        stage('Deploy to Kubernetes') {
-            when {
-                expression { params.BUILD_MODE == 'FULL' }
+        stage('Local Container Smoke Test') {
+            steps {
+                script {
+                    bat 'docker rm -f e-waste-smoke >NUL 2>&1 || exit /b 0'
+
+                    bat "docker run -d --name e-waste-smoke -p 18087:80 ${env.DOCKERHUB_USERNAME}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+
+                    bat '''
+                    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ok=$false; for($i=0;$i -lt 15;$i++){try{$r=Invoke-WebRequest -UseBasicParsing http://localhost:18087; if($r.StatusCode -eq 200 -and $r.Content.Contains('Central Civic Collection Centre')){$ok=$true;break}}catch{}; Start-Sleep -Seconds 2}; if(-not $ok){docker logs e-waste-smoke; exit 1}"
+                    '''
+
+                    bat 'docker rm -f e-waste-smoke'
+                }
             }
+        }
+
+        stage('Archive Build Artifacts') {
+            steps {
+                archiveArtifacts(
+                    artifacts: 'index.html,Dockerfile,Jenkinsfile,deployment.yaml,image-inspect.json',
+                    fingerprint: true
+                )
+            }
+        }
+
+        stage('Push Image to Docker Hub') {
             steps {
                 withCredentials([
-                    file(
-                        credentialsId: 'kubernetes-creds',
-                        variable: 'KUBECONFIG_FILE'
+                    usernamePassword(
+                        credentialsId: 'dockerhub-creds',
+                        usernameVariable: 'DH_USER',
+                        passwordVariable: 'DH_TOKEN'
                     )
                 ]) {
-                    powershell '''
-                        $ErrorActionPreference = "Stop"
+                    script {
+                        int loginStatus = powershell(
+                            returnStatus: true,
+                            script: '''
+                                $ErrorActionPreference = "Stop"
 
-                        if (!(Test-Path $env:KUBECONFIG_FILE)) {
-                            throw "Kubeconfig file not found"
+                                if ([string]::IsNullOrWhiteSpace($env:DH_USER)) {
+                                    Write-Error "Docker Hub username is empty."
+                                    exit 1
+                                }
+
+                                if ([string]::IsNullOrEmpty($env:DH_TOKEN)) {
+                                    Write-Error "Docker Hub token is empty."
+                                    exit 1
+                                }
+
+                                $psi = New-Object System.Diagnostics.ProcessStartInfo
+                                $psi.FileName = "docker"
+                                $psi.Arguments = "login --username $env:DH_USER --password-stdin"
+                                $psi.UseShellExecute = $false
+                                $psi.RedirectStandardInput = $true
+                                $psi.RedirectStandardOutput = $true
+                                $psi.RedirectStandardError = $true
+                                $psi.CreateNoWindow = $true
+
+                                $process = New-Object System.Diagnostics.Process
+                                $process.StartInfo = $psi
+                                [void]$process.Start()
+
+                                $process.StandardInput.WriteLine($env:DH_TOKEN)
+                                $process.StandardInput.Close()
+
+                                $stdout = $process.StandardOutput.ReadToEnd()
+                                $stderr = $process.StandardError.ReadToEnd()
+                                $process.WaitForExit()
+
+                                if ($stdout) { Write-Output $stdout }
+                                if ($stderr) { Write-Output $stderr }
+
+                                exit $process.ExitCode
+                            '''
+                        )
+
+                        if (loginStatus != 0) {
+                            error('Docker Hub login failed. Check the existing dockerhub-creds secret value and username without printing the token.')
                         }
 
-                        $env:KUBECONFIG = $env:KUBECONFIG_FILE
+                        try {
+                            bat "docker push ${env.DOCKERHUB_USERNAME}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
 
-                        kubectl cluster-info
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Cannot connect to Kubernetes. Check the cluster and kubeconfig."
+                            bat "docker tag ${env.DOCKERHUB_USERNAME}/${env.IMAGE_NAME}:${env.IMAGE_TAG} ${env.DOCKERHUB_USERNAME}/${env.IMAGE_NAME}:latest"
+
+                            bat "docker push ${env.DOCKERHUB_USERNAME}/${env.IMAGE_NAME}:latest"
+                        } finally {
+                            bat 'docker logout'
                         }
+                    }
+                }
+            }
+        }
 
-                        kubectl apply -f deployment.yaml
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Kubernetes manifest apply failed"
+        stage('Deploy and Verify on Kubernetes') {
+            when {
+                expression {
+                    return params.DEPLOY_TO_KUBERNETES
+                }
+            }
+
+            steps {
+                script {
+                    withCredentials([
+                        file(
+                            credentialsId: 'kubernetes-creds',
+                            variable: 'KUBECONFIG'
+                        )
+                    ]) {
+                        bat 'kubectl version --client'
+                        bat 'kubectl cluster-info'
+
+                        bat 'kubectl apply -f deployment.yaml'
+
+                        bat "kubectl set image deployment/${env.K8S_DEPLOYMENT} ${env.K8S_CONTAINER}=${env.DOCKERHUB_USERNAME}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+
+                        if (params.RELEASE_MODE == 'FAULTY_ROLLBACK_TEST') {
+                            echo 'Testing recovery from an intentionally faulty readiness probe.'
+
+                            writeFile(
+                                file: 'faulty-patch.json',
+                                text: '''{
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "ewaste-portal",
+            "readinessProbe": {
+              "httpGet": {
+                "path": "/faulty-health-check",
+                "port": 80
+              },
+              "initialDelaySeconds": 1,
+              "periodSeconds": 3,
+              "timeoutSeconds": 1,
+              "failureThreshold": 2
+            }
+          }
+        ]
+      }
+    }
+  }
+}'''
+                            )
+
+                            bat "kubectl patch deployment ${env.K8S_DEPLOYMENT} --type=strategic --patch-file=faulty-patch.json"
+
+                            int faultyStatus = bat(
+                                returnStatus: true,
+                                script: "kubectl rollout status deployment/${env.K8S_DEPLOYMENT} --timeout=90s"
+                            )
+
+                            if (faultyStatus == 0) {
+                                echo 'The faulty rollout unexpectedly became ready.'
+                            } else {
+                                echo 'The faulty rollout failed as expected. Checking deployment status.'
+                            }
+
+                            bat "kubectl get pods -o wide"
+                            bat "kubectl describe deployment ${env.K8S_DEPLOYMENT}"
+                            bat "kubectl rollout history deployment/${env.K8S_DEPLOYMENT}"
+
+                            int undoStatus = bat(
+                                returnStatus: true,
+                                script: "kubectl rollout undo deployment/${env.K8S_DEPLOYMENT}"
+                            )
+
+                            if (undoStatus != 0) {
+                                error('Rollback command failed. Check Kubernetes deployment history.')
+                            }
+
+                            int recoveryStatus = bat(
+                                returnStatus: true,
+                                script: "kubectl rollout status deployment/${env.K8S_DEPLOYMENT} --timeout=120s"
+                            )
+
+                            if (recoveryStatus != 0) {
+                                error('Rollback was requested, but the previous revision did not become healthy.')
+                            }
+
+                            bat "kubectl get deployment ${env.K8S_DEPLOYMENT}"
+                            bat "kubectl get pods"
+                            bat "kubectl get service ${env.K8S_SERVICE}"
+
+                            if (faultyStatus == 0) {
+                                error('The faulty rollout unexpectedly passed. The previous revision was restored; review the probe configuration.')
+                            }
+
+                            echo 'Rollback test passed: the previous revision recovered.'
+                        } else {
+                            int rolloutStatus = bat(
+                                returnStatus: true,
+                                script: "kubectl rollout status deployment/${env.K8S_DEPLOYMENT} --timeout=120s"
+                            )
+
+                            if (rolloutStatus != 0) {
+                                echo 'Stable deployment failed. Collecting diagnostics.'
+
+                                bat 'kubectl get pods -o wide'
+                                bat "kubectl describe deployment ${env.K8S_DEPLOYMENT}"
+                                bat "kubectl rollout history deployment/${env.K8S_DEPLOYMENT}"
+
+                                int undoStatus = bat(
+                                    returnStatus: true,
+                                    script: "kubectl rollout undo deployment/${env.K8S_DEPLOYMENT}"
+                                )
+
+                                if (undoStatus != 0) {
+                                    error('Deployment failed and rollback could not be initiated.')
+                                }
+
+                                bat "kubectl rollout status deployment/${env.K8S_DEPLOYMENT} --timeout=120s"
+
+                                error('Stable deployment failed. The previous revision was restored.')
+                            }
+
+                            bat "kubectl get deployment ${env.K8S_DEPLOYMENT}"
+                            bat 'kubectl get pods'
+                            bat "kubectl get service ${env.K8S_SERVICE}"
+
+                            echo 'Stable deployment completed successfully.'
                         }
-
-                        $newImage = "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
-
-                        kubectl set image `
-                            "deployment/$env:K8S_DEPLOYMENT" `
-                            "$env:K8S_CONTAINER=$newImage"
-
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Kubernetes image update failed"
-                        }
-
-                        kubectl rollout status `
-                            "deployment/$env:K8S_DEPLOYMENT" `
-                            --timeout=120s
-
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Kubernetes rollout failed"
-                        }
-
-                        kubectl get deployments
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Failed to list deployments"
-                        }
-
-                        kubectl get services
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Failed to list services"
-                        }
-
-                        kubectl get pods
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Failed to list pods"
-                        }
-                    '''
+                    }
                 }
             }
         }
     }
 
     post {
-        success {
-            echo 'SUCCESS: E-Waste pipeline completed successfully.'
-        }
-        failure {
-            echo 'FAILED: Check the first failing stage in Console Output.'
-        }
         always {
-            echo 'E-Waste pipeline finished.'
+            bat 'docker rm -f e-waste-smoke >NUL 2>&1 || exit /b 0'
+            echo 'Pipeline finished. Review the stage logs and deployment status.'
         }
     }
 }
