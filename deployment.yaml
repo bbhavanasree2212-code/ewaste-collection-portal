@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: ewaste-portal
-          image: YOUR_DOCKERHUB_USERNAME/ewaste-portal:latest
+          image: bbhavanasree/ewaste-portal:latest
           ports:
             - containerPort: 80
           readinessProbe:
