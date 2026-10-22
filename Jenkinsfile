@@ -139,82 +139,70 @@ pipeline {
             }
         }
 
-        stage('Push to Docker Hub') {
-            when {
-                expression { params.BUILD_MODE == 'FULL' }
-            }
+        
+stage('Push to Docker Hub') {
+    steps {
+        withCredentials([
+            usernamePassword(
+                credentialsId: 'dockerhub-creds',
+                usernameVariable: 'DOCKER_USER',
+                passwordVariable: 'DOCKER_PASS'
+            )
+        ]) {
+            powershell '''
+                $ErrorActionPreference = "Stop"
 
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-creds',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )
-                ]) {
-                    powershell '''
-                        $ErrorActionPreference = "Stop"
-
-                        $dockerConfig = Join-Path $env:WORKSPACE ".docker-auth-$env:BUILD_NUMBER"
-                        New-Item -ItemType Directory -Force -Path $dockerConfig |
-                            Out-Null
-                        $env:DOCKER_CONFIG = $dockerConfig
-
-                        try {
-                            $psi = New-Object System.Diagnostics.ProcessStartInfo
-                            $psi.FileName = (Get-Command docker.exe -ErrorAction Stop).Source
-                            $psi.Arguments = "login --username $env:DOCKER_USER --password-stdin"
-                            $psi.UseShellExecute = $false
-                            $psi.CreateNoWindow = $true
-                            $psi.RedirectStandardInput = $true
-                            $psi.RedirectStandardOutput = $true
-                            $psi.RedirectStandardError = $true
-
-                            $proc = New-Object System.Diagnostics.Process
-                            $proc.StartInfo = $psi
-                            [void]$proc.Start()
-
-                            $outTask = $proc.StandardOutput.ReadToEndAsync()
-                            $errTask = $proc.StandardError.ReadToEndAsync()
-
-                            $proc.StandardInput.WriteLine($env:DOCKER_PASS)
-                            $proc.StandardInput.Close()
-                            $proc.WaitForExit()
-
-                            if ($outTask.Result) {
-                                Write-Host $outTask.Result
-                            }
-
-                            if ($proc.ExitCode -ne 0) {
-                                if ($errTask.Result) {
-                                    Write-Host $errTask.Result
-                                }
-                                throw "Docker Hub login failed."
-                            }
-
-                            Write-Host "Docker Hub login successful."
-
-                            docker push "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
-                            if ($LASTEXITCODE -ne 0) {
-                                throw "Versioned image push failed."
-                            }
-
-                            docker push "$env:IMAGE_NAME`:latest"
-                            if ($LASTEXITCODE -ne 0) {
-                                throw "Latest image push failed."
-                            }
-
-                            Write-Host "Docker Hub push successful."
-                        }
-                        finally {
-                            docker logout 2>$null | Out-Null
-                            Remove-Item $dockerConfig -Recurse -Force `
-                                -ErrorAction SilentlyContinue
-                        }
-                    '''
+                if ($env:DOCKER_USER -ne "bbhavanasree") {
+                    throw "Unexpected Docker Hub username in Jenkins credentials."
                 }
-            }
+
+                if ([string]::IsNullOrWhiteSpace($env:DOCKER_PASS)) {
+                    throw "Docker Hub secret is empty in Jenkins."
+                }
+
+                $psi = New-Object System.Diagnostics.ProcessStartInfo
+                $psi.FileName = "docker.exe"
+                $psi.Arguments = "login --username $env:DOCKER_USER --password-stdin"
+                $psi.UseShellExecute = $false
+                $psi.RedirectStandardInput = $true
+                $psi.RedirectStandardOutput = $true
+                $psi.RedirectStandardError = $true
+                $psi.CreateNoWindow = $true
+
+                $process = New-Object System.Diagnostics.Process
+                $process.StartInfo = $psi
+                [void]$process.Start()
+
+                $process.StandardInput.WriteLine($env:DOCKER_PASS)
+                $process.StandardInput.Close()
+
+                $stdout = $process.StandardOutput.ReadToEnd()
+                $stderr = $process.StandardError.ReadToEnd()
+                $process.WaitForExit()
+
+                if ($process.ExitCode -ne 0) {
+                    Write-Host "Docker login was rejected. Check the existing Jenkins secret value and credential type."
+                    if ($stdout) { Write-Host $stdout }
+                    if ($stderr) { Write-Host $stderr }
+                    throw "Docker Hub login failed."
+                }
+
+                Write-Host "Docker Hub login successful."
+
+                docker push "bbhavanasree/ewaste-portal:$env:BUILD_NUMBER"
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Failed to push the build-number image."
+                }
+
+                docker push "bbhavanasree/ewaste-portal:latest"
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Failed to push the latest image."
+                }
+            '''
         }
+    }
+}
+
 
         stage('Deploy to Kubernetes') {
             when {
