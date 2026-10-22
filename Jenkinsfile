@@ -6,7 +6,7 @@ pipeline {
         choice(
             name: 'BUILD_MODE',
             choices: ['FULL', 'TEST_ONLY'],
-            description: 'FULL runs the entire pipeline; TEST_ONLY builds and tests.'
+            description: 'FULL runs all stages; TEST_ONLY builds and tests.'
         )
     }
 
@@ -44,37 +44,33 @@ pipeline {
             }
         }
 
-       
-stage('Validate Kubernetes YAML') {
-    steps {
-        powershell '''
-            $ErrorActionPreference = "Stop"
+        stage('Validate Kubernetes YAML') {
+            steps {
+                powershell '''
+                    $ErrorActionPreference = "Stop"
 
-            if (!(Test-Path "deployment.yaml")) {
-                throw "deployment.yaml not found"
+                    if (!(Test-Path "deployment.yaml")) {
+                        throw "deployment.yaml not found"
+                    }
+
+                    $yaml = Get-Content "deployment.yaml" -Raw
+
+                    if ($yaml -notmatch '(?m)^kind:\\s*Deployment\\s*$') {
+                        throw "Deployment resource missing in deployment.yaml"
+                    }
+
+                    if ($yaml -notmatch '(?m)^kind:\\s*Service\\s*$') {
+                        throw "Service resource missing in deployment.yaml"
+                    }
+
+                    if ($yaml -notmatch 'ewaste-portal') {
+                        throw "Expected E-Waste portal name not found"
+                    }
+
+                    Write-Host "Local Kubernetes manifest checks passed."
+                '''
             }
-
-            # Verify the manifest contains the required Kubernetes resources.
-            $yaml = Get-Content "deployment.yaml" -Raw
-
-            if ($yaml -notmatch '(?m)^kind:\\s*Deployment\\s*$') {
-                throw "Deployment resource not found in deployment.yaml"
-            }
-
-            if ($yaml -notmatch '(?m)^kind:\\s*Service\\s*$') {
-                throw "Service resource not found in deployment.yaml"
-            }
-
-            if ($yaml -notmatch 'ewaste-portal') {
-                throw "Expected E-Waste image or container name not found"
-            }
-
-            Write-Host "Kubernetes manifest checks passed."
-            Write-Host "Live cluster validation will occur during deployment."
-        '''
-    }
-}
-
+        }
 
         stage('Archive Artifacts') {
             steps {
@@ -101,12 +97,10 @@ stage('Validate Kubernetes YAML') {
             steps {
                 powershell '''
                     $ErrorActionPreference = "Stop"
-
                     $containerName = "ewaste-test-$env:BUILD_NUMBER"
                     $image = "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
 
                     docker rm -f $containerName 2>$null | Out-Null
-
                     docker run -d --name $containerName -p 18080:80 $image
 
                     if ($LASTEXITCODE -ne 0) {
@@ -120,8 +114,7 @@ stage('Validate Kubernetes YAML') {
                             try {
                                 $response = Invoke-WebRequest `
                                     -Uri "http://127.0.0.1:18080" `
-                                    -UseBasicParsing `
-                                    -TimeoutSec 3
+                                    -UseBasicParsing -TimeoutSec 3
 
                                 if ($response.StatusCode -eq 200) {
                                     $passed = $true
@@ -162,24 +155,12 @@ stage('Validate Kubernetes YAML') {
                     powershell '''
                         $ErrorActionPreference = "Stop"
 
-                        if ($env:DOCKER_USER -ne "bbhavanasree") {
-                            throw "Unexpected Docker Hub username."
-                        }
-
-                        if ([string]::IsNullOrWhiteSpace($env:DOCKER_PASS)) {
-                            throw "Docker Hub credential is empty."
-                        }
-
                         $dockerConfig = Join-Path $env:WORKSPACE ".docker-auth-$env:BUILD_NUMBER"
-
                         New-Item -ItemType Directory -Force -Path $dockerConfig |
                             Out-Null
-
                         $env:DOCKER_CONFIG = $dockerConfig
 
                         try {
-                            # Start Docker directly and send the credential
-                            # through standard input, without a PowerShell pipe.
                             $psi = New-Object System.Diagnostics.ProcessStartInfo
                             $psi.FileName = (Get-Command docker.exe -ErrorAction Stop).Source
                             $psi.Arguments = "login --username $env:DOCKER_USER --password-stdin"
@@ -191,54 +172,43 @@ stage('Validate Kubernetes YAML') {
 
                             $proc = New-Object System.Diagnostics.Process
                             $proc.StartInfo = $psi
-
                             [void]$proc.Start()
 
-                            $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
-                            $stderrTask = $proc.StandardError.ReadToEndAsync()
+                            $outTask = $proc.StandardOutput.ReadToEndAsync()
+                            $errTask = $proc.StandardError.ReadToEndAsync()
 
                             $proc.StandardInput.WriteLine($env:DOCKER_PASS)
                             $proc.StandardInput.Close()
-
                             $proc.WaitForExit()
 
-                            $loginOutput = $stdoutTask.Result
-                            $loginError = $stderrTask.Result
-                            $loginCode = $proc.ExitCode
-
-                            if ($loginOutput) {
-                                Write-Host $loginOutput
+                            if ($outTask.Result) {
+                                Write-Host $outTask.Result
                             }
 
-                            if ($loginCode -ne 0) {
-                                if ($loginError) {
-                                    Write-Host $loginError
+                            if ($proc.ExitCode -ne 0) {
+                                if ($errTask.Result) {
+                                    Write-Host $errTask.Result
                                 }
-
-                                throw "Docker Hub login failed with exit code $loginCode."
+                                throw "Docker Hub login failed."
                             }
 
                             Write-Host "Docker Hub login successful."
 
                             docker push "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
-
                             if ($LASTEXITCODE -ne 0) {
                                 throw "Versioned image push failed."
                             }
 
                             docker push "$env:IMAGE_NAME`:latest"
-
                             if ($LASTEXITCODE -ne 0) {
                                 throw "Latest image push failed."
                             }
 
-                            Write-Host "Both images pushed successfully."
+                            Write-Host "Docker Hub push successful."
                         }
                         finally {
                             docker logout 2>$null | Out-Null
-
-                            Remove-Item -Path $dockerConfig `
-                                -Recurse -Force `
+                            Remove-Item $dockerConfig -Recurse -Force `
                                 -ErrorAction SilentlyContinue
                         }
                     '''
@@ -260,13 +230,16 @@ stage('Validate Kubernetes YAML') {
                 ]) {
                     powershell '''
                         $ErrorActionPreference = "Stop"
-
                         $env:KUBECONFIG = $env:KUBECONFIG_FILE
 
-                        kubectl apply -f deployment.yaml
-
+                        kubectl cluster-info
                         if ($LASTEXITCODE -ne 0) {
-                            throw "Kubernetes apply failed."
+                            throw "Cannot connect to Kubernetes. Check cluster and kubeconfig."
+                        }
+
+                        kubectl apply -f deployment.yaml
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Kubernetes manifest apply failed."
                         }
 
                         $newImage = "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
@@ -298,15 +271,13 @@ stage('Validate Kubernetes YAML') {
 
     post {
         success {
-            echo 'SUCCESS: E-Waste Portal pipeline completed.'
+            echo 'SUCCESS: E-Waste pipeline completed successfully.'
         }
-
         failure {
-            echo 'FAILED: Check the first error in Console Output.'
+            echo 'FAILED: Check the first failing stage in Console Output.'
         }
-
         always {
-            echo 'E-Waste Portal pipeline finished.'
+            echo 'E-Waste pipeline finished.'
         }
     }
 }
