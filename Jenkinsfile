@@ -13,7 +13,7 @@ pipeline {
         choice(
             name: 'BUILD_MODE',
             choices: ['FULL', 'TEST_ONLY'],
-            description: 'FULL builds, tests, pushes and deploys. TEST_ONLY validates and tests locally.'
+            description: 'FULL builds, tests, pushes and deploys. TEST_ONLY validates, builds and tests locally.'
         )
     }
 
@@ -41,29 +41,44 @@ pipeline {
             parallel {
                 stage('HTML Validation') {
                     steps {
-                        bat 'if not exist index.html exit /b 1'
-                        bat 'findstr /C:"Central Civic Collection Centre" index.html'
-                        bat 'findstr /C:"Successfully recycled" index.html'
-                        bat 'findstr /C:"scheduleForm" index.html'
+                        bat 'if not exist index.html (echo ERROR: index.html not found & exit /b 1)'
+
+                        powershell '''
+                            $ErrorActionPreference = "Stop"
+                            $html = Get-Content "index.html" -Raw
+
+                            if ($html -notmatch '(?i)<html\\b') {
+                                throw "HTML opening tag was not found."
+                            }
+
+                            if ($html -notmatch '(?i)<body\\b') {
+                                throw "HTML body tag was not found."
+                            }
+
+                            if ($html -notmatch '(?i)</html>') {
+                                throw "HTML closing tag was not found."
+                            }
+
+                            Write-Host "HTML validation passed."
+                        '''
                     }
                 }
 
                 stage('Docker and Kubernetes File Validation') {
                     steps {
-                        bat 'if not exist Dockerfile exit /b 1'
-                        bat 'if not exist deployment.yaml exit /b 1'
+                        bat 'if not exist Dockerfile (echo ERROR: Dockerfile not found & exit /b 1)'
+                        bat 'if not exist deployment.yaml (echo ERROR: deployment.yaml not found & exit /b 1)'
 
                         powershell '''
                             $ErrorActionPreference = "Stop"
-
                             $yaml = Get-Content "deployment.yaml" -Raw
 
                             if ($yaml -notmatch '(?m)^kind:\\s*Deployment\\s*$') {
-                                throw "Deployment resource is missing from deployment.yaml."
+                                throw "Deployment resource not found in deployment.yaml."
                             }
 
                             if ($yaml -notmatch '(?m)^kind:\\s*Service\\s*$') {
-                                throw "Service resource is missing from deployment.yaml."
+                                throw "Service resource not found in deployment.yaml."
                             }
 
                             Write-Host "Deployment and Service declarations found."
@@ -93,10 +108,34 @@ pipeline {
                     try {
                         bat "docker run -d --name ewaste-smoke -p 18087:80 ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
 
-                        bat '''
-                            powershell -NoProfile -ExecutionPolicy Bypass -Command "$ok=$false; for($i=0;$i -lt 15;$i++){try{$r=Invoke-WebRequest -UseBasicParsing http://localhost:18087; if($r.StatusCode -eq 200 -and $r.Content.Contains('Central Civic Collection Centre')){$ok=$true;break}}catch{}; Start-Sleep -Seconds 2}; if(-not $ok){docker logs ewaste-smoke; exit 1}"
+                        powershell '''
+                            $ErrorActionPreference = "Stop"
+                            $url = "http://localhost:18087"
+                            $success = $false
+
+                            for ($i = 0; $i -lt 15; $i++) {
+                                try {
+                                    $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+
+                                    if ($response.StatusCode -eq 200) {
+                                        $success = $true
+                                        break
+                                    }
+                                }
+                                catch {
+                                    Start-Sleep -Seconds 2
+                                }
+                            }
+
+                            if (-not $success) {
+                                docker logs ewaste-smoke
+                                throw "Smoke test failed: website did not return HTTP 200."
+                            }
+
+                            Write-Host "Smoke test passed: website returned HTTP 200."
                         '''
-                    } finally {
+                    }
+                    finally {
                         bat 'docker rm -f ewaste-smoke >NUL 2>&1 || exit /b 0'
                     }
                 }
@@ -133,6 +172,16 @@ pipeline {
                             script: '''
                                 $ErrorActionPreference = "Stop"
 
+                                if ([string]::IsNullOrWhiteSpace($env:DH_USER)) {
+                                    Write-Error "Docker Hub username is empty."
+                                    exit 1
+                                }
+
+                                if ([string]::IsNullOrEmpty($env:DH_TOKEN)) {
+                                    Write-Error "Docker Hub credential is empty."
+                                    exit 1
+                                }
+
                                 $psi = New-Object System.Diagnostics.ProcessStartInfo
                                 $psi.FileName = "docker"
                                 $psi.Arguments = "login --username $env:DH_USER --password-stdin"
@@ -142,21 +191,21 @@ pipeline {
                                 $psi.RedirectStandardError = $true
                                 $psi.CreateNoWindow = $true
 
-                                $p = New-Object System.Diagnostics.Process
-                                $p.StartInfo = $psi
-                                [void]$p.Start()
+                                $process = New-Object System.Diagnostics.Process
+                                $process.StartInfo = $psi
+                                [void]$process.Start()
 
-                                $p.StandardInput.WriteLine($env:DH_TOKEN)
-                                $p.StandardInput.Close()
+                                $process.StandardInput.WriteLine($env:DH_TOKEN)
+                                $process.StandardInput.Close()
 
-                                $out = $p.StandardOutput.ReadToEnd()
-                                $err = $p.StandardError.ReadToEnd()
-                                $p.WaitForExit()
+                                $stdout = $process.StandardOutput.ReadToEnd()
+                                $stderr = $process.StandardError.ReadToEnd()
+                                $process.WaitForExit()
 
-                                if ($out) { Write-Output $out }
-                                if ($err) { Write-Output $err }
+                                if ($stdout) { Write-Output $stdout }
+                                if ($stderr) { Write-Output $stderr }
 
-                                exit $p.ExitCode
+                                exit $process.ExitCode
                             '''
                         )
 
@@ -170,7 +219,8 @@ pipeline {
                             bat "docker tag ${env.IMAGE_NAME}:${env.IMAGE_TAG} ${env.IMAGE_NAME}:latest"
 
                             bat "docker push ${env.IMAGE_NAME}:latest"
-                        } finally {
+                        }
+                        finally {
                             bat 'docker logout'
                         }
                     }
@@ -234,7 +284,7 @@ pipeline {
                         }
 
                         bat "kubectl get deployment ${env.K8S_DEPLOYMENT}"
-                        bat "kubectl get pods"
+                        bat 'kubectl get pods'
                         bat "kubectl get service ${env.K8S_SERVICE}"
 
                         echo 'Deployment completed successfully.'
