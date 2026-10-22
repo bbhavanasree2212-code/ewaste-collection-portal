@@ -2,11 +2,16 @@
 pipeline {
     agent any
 
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+    }
+
     parameters {
         choice(
             name: 'BUILD_MODE',
             choices: ['FULL', 'TEST_ONLY'],
-            description: 'FULL runs all stages; TEST_ONLY builds and tests.'
+            description: 'FULL builds, pushes and deploys. TEST_ONLY builds and tests without pushing or deploying.'
         )
     }
 
@@ -19,8 +24,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/bbhavanasree2212-code/ewaste-collection-portal.git'
+                checkout scm
             }
         }
 
@@ -35,7 +39,7 @@ pipeline {
 
                     $html = Get-Content "index.html" -Raw
 
-                    if ($html -notmatch "<html") {
+                    if ($html -notmatch '(?i)<html') {
                         throw "HTML validation failed"
                     }
 
@@ -56,18 +60,18 @@ pipeline {
                     $yaml = Get-Content "deployment.yaml" -Raw
 
                     if ($yaml -notmatch '(?m)^kind:\\s*Deployment\\s*$') {
-                        throw "Deployment resource missing in deployment.yaml"
+                        throw "Deployment resource missing"
                     }
 
                     if ($yaml -notmatch '(?m)^kind:\\s*Service\\s*$') {
-                        throw "Service resource missing in deployment.yaml"
+                        throw "Service resource missing"
                     }
 
                     if ($yaml -notmatch 'ewaste-portal') {
                         throw "Expected E-Waste portal name not found"
                     }
 
-                    Write-Host "Local Kubernetes manifest checks passed."
+                    Write-Host "Local Kubernetes manifest checks passed"
                 '''
             }
         }
@@ -84,6 +88,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 bat '''
+                    @echo off
                     docker build -t %IMAGE_NAME%:%BUILD_NUMBER% .
                     if errorlevel 1 exit /b 1
 
@@ -97,12 +102,13 @@ pipeline {
             steps {
                 powershell '''
                     $ErrorActionPreference = "Stop"
+
                     $containerName = "ewaste-test-$env:BUILD_NUMBER"
                     $image = "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
 
                     docker rm -f $containerName 2>$null | Out-Null
-                    docker run -d --name $containerName -p 18080:80 $image
 
+                    docker run -d --name $containerName -p 18080:80 $image
                     if ($LASTEXITCODE -ne 0) {
                         throw "Docker container failed to start"
                     }
@@ -114,7 +120,8 @@ pipeline {
                             try {
                                 $response = Invoke-WebRequest `
                                     -Uri "http://127.0.0.1:18080" `
-                                    -UseBasicParsing -TimeoutSec 3
+                                    -UseBasicParsing `
+                                    -TimeoutSec 3
 
                                 if ($response.StatusCode -eq 200) {
                                     $passed = $true
@@ -127,88 +134,94 @@ pipeline {
                         }
 
                         if (!$passed) {
+                            docker logs $containerName
                             throw "Website HTTP test failed"
                         }
 
                         Write-Host "Website HTTP test passed: HTTP 200"
                     }
                     finally {
-                        docker rm -f $containerName | Out-Null
+                        docker rm -f $containerName 2>$null | Out-Null
                     }
                 '''
             }
         }
 
-        
-stage('Push to Docker Hub') {
-    steps {
-        withCredentials([
-            usernamePassword(
-                credentialsId: 'dockerhub-creds',
-                usernameVariable: 'DOCKER_USER',
-                passwordVariable: 'DOCKER_PASS'
-            )
-        ]) {
-            powershell '''
-                $ErrorActionPreference = "Stop"
+        stage('Push to Docker Hub') {
+            when {
+                expression { params.BUILD_MODE == 'FULL' }
+            }
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-creds',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+                    powershell '''
+                        $ErrorActionPreference = "Stop"
 
-                if ($env:DOCKER_USER -ne "bbhavanasree") {
-                    throw "Unexpected Docker Hub username in Jenkins credentials."
+                        if ($env:DOCKER_USER -ne "bbhavanasree") {
+                            throw "Unexpected Docker Hub username in Jenkins credential"
+                        }
+
+                        if ([string]::IsNullOrWhiteSpace($env:DOCKER_PASS)) {
+                            throw "Docker Hub secret is empty"
+                        }
+
+                        # Use stdin so the secret is not included in command arguments.
+                        $psi = New-Object System.Diagnostics.ProcessStartInfo
+                        $psi.FileName = "docker.exe"
+                        $psi.Arguments = "login --username $env:DOCKER_USER --password-stdin"
+                        $psi.UseShellExecute = $false
+                        $psi.RedirectStandardInput = $true
+                        $psi.RedirectStandardOutput = $true
+                        $psi.RedirectStandardError = $true
+                        $psi.CreateNoWindow = $true
+
+                        $process = New-Object System.Diagnostics.Process
+                        $process.StartInfo = $psi
+
+                        [void]$process.Start()
+
+                        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+                        $stderrTask = $process.StandardError.ReadToEndAsync()
+
+                        $process.StandardInput.WriteLine($env:DOCKER_PASS)
+                        $process.StandardInput.Close()
+                        $process.WaitForExit()
+
+                        $stdout = $stdoutTask.Result
+                        $stderr = $stderrTask.Result
+
+                        if ($process.ExitCode -ne 0) {
+                            Write-Host "Docker Hub rejected the login. The token value itself cannot be corrected by Jenkinsfile code."
+                            if ($stdout) { Write-Host $stdout }
+                            if ($stderr) { Write-Host $stderr }
+                            throw "Docker Hub login failed"
+                        }
+
+                        Write-Host "Docker Hub login successful"
+
+                        docker push "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Failed to push build-number image"
+                        }
+
+                        docker push "$env:IMAGE_NAME`:latest"
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Failed to push latest image"
+                        }
+                    '''
                 }
-
-                if ([string]::IsNullOrWhiteSpace($env:DOCKER_PASS)) {
-                    throw "Docker Hub secret is empty in Jenkins."
-                }
-
-                $psi = New-Object System.Diagnostics.ProcessStartInfo
-                $psi.FileName = "docker.exe"
-                $psi.Arguments = "login --username $env:DOCKER_USER --password-stdin"
-                $psi.UseShellExecute = $false
-                $psi.RedirectStandardInput = $true
-                $psi.RedirectStandardOutput = $true
-                $psi.RedirectStandardError = $true
-                $psi.CreateNoWindow = $true
-
-                $process = New-Object System.Diagnostics.Process
-                $process.StartInfo = $psi
-                [void]$process.Start()
-
-                $process.StandardInput.WriteLine($env:DOCKER_PASS)
-                $process.StandardInput.Close()
-
-                $stdout = $process.StandardOutput.ReadToEnd()
-                $stderr = $process.StandardError.ReadToEnd()
-                $process.WaitForExit()
-
-                if ($process.ExitCode -ne 0) {
-                    Write-Host "Docker login was rejected. Check the existing Jenkins secret value and credential type."
-                    if ($stdout) { Write-Host $stdout }
-                    if ($stderr) { Write-Host $stderr }
-                    throw "Docker Hub login failed."
-                }
-
-                Write-Host "Docker Hub login successful."
-
-                docker push "bbhavanasree/ewaste-portal:$env:BUILD_NUMBER"
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to push the build-number image."
-                }
-
-                docker push "bbhavanasree/ewaste-portal:latest"
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to push the latest image."
-                }
-            '''
+            }
         }
-    }
-}
-
 
         stage('Deploy to Kubernetes') {
             when {
                 expression { params.BUILD_MODE == 'FULL' }
             }
-
             steps {
                 withCredentials([
                     file(
@@ -218,16 +231,21 @@ stage('Push to Docker Hub') {
                 ]) {
                     powershell '''
                         $ErrorActionPreference = "Stop"
+
+                        if (!(Test-Path $env:KUBECONFIG_FILE)) {
+                            throw "Kubeconfig file not found"
+                        }
+
                         $env:KUBECONFIG = $env:KUBECONFIG_FILE
 
                         kubectl cluster-info
                         if ($LASTEXITCODE -ne 0) {
-                            throw "Cannot connect to Kubernetes. Check cluster and kubeconfig."
+                            throw "Cannot connect to Kubernetes. Check the cluster and kubeconfig."
                         }
 
                         kubectl apply -f deployment.yaml
                         if ($LASTEXITCODE -ne 0) {
-                            throw "Kubernetes manifest apply failed."
+                            throw "Kubernetes manifest apply failed"
                         }
 
                         $newImage = "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
@@ -237,7 +255,7 @@ stage('Push to Docker Hub') {
                             "$env:K8S_CONTAINER=$newImage"
 
                         if ($LASTEXITCODE -ne 0) {
-                            throw "Kubernetes image update failed."
+                            throw "Kubernetes image update failed"
                         }
 
                         kubectl rollout status `
@@ -245,12 +263,23 @@ stage('Push to Docker Hub') {
                             --timeout=120s
 
                         if ($LASTEXITCODE -ne 0) {
-                            throw "Kubernetes rollout failed."
+                            throw "Kubernetes rollout failed"
                         }
 
                         kubectl get deployments
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Failed to list deployments"
+                        }
+
                         kubectl get services
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Failed to list services"
+                        }
+
                         kubectl get pods
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Failed to list pods"
+                        }
                     '''
                 }
             }
