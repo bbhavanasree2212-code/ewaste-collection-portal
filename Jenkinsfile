@@ -6,7 +6,7 @@ pipeline {
         choice(
             name: 'BUILD_MODE',
             choices: ['FULL', 'TEST_ONLY'],
-            description: 'FULL builds, tests, pushes and deploys. TEST_ONLY builds and tests only.'
+            description: 'FULL runs the entire pipeline; TEST_ONLY builds and tests.'
         )
     }
 
@@ -150,36 +150,77 @@ pipeline {
                     powershell '''
                         $ErrorActionPreference = "Stop"
 
-                        # Isolated Docker configuration for this Jenkins build
-                        $dockerConfig = Join-Path $env:WORKSPACE ".docker-$env:BUILD_NUMBER"
+                        if ($env:DOCKER_USER -ne "bbhavanasree") {
+                            throw "Unexpected Docker Hub username."
+                        }
 
-                        New-Item -ItemType Directory -Path $dockerConfig -Force |
+                        if ([string]::IsNullOrWhiteSpace($env:DOCKER_PASS)) {
+                            throw "Docker Hub credential is empty."
+                        }
+
+                        $dockerConfig = Join-Path $env:WORKSPACE ".docker-auth-$env:BUILD_NUMBER"
+
+                        New-Item -ItemType Directory -Force -Path $dockerConfig |
                             Out-Null
 
                         $env:DOCKER_CONFIG = $dockerConfig
 
                         try {
-                            # Pass the existing Jenkins credential securely via stdin
-                            $env:DOCKER_PASS |
-                                docker login --username $env:DOCKER_USER --password-stdin
+                            # Start Docker directly and send the credential
+                            # through standard input, without a PowerShell pipe.
+                            $psi = New-Object System.Diagnostics.ProcessStartInfo
+                            $psi.FileName = (Get-Command docker.exe -ErrorAction Stop).Source
+                            $psi.Arguments = "login --username $env:DOCKER_USER --password-stdin"
+                            $psi.UseShellExecute = $false
+                            $psi.CreateNoWindow = $true
+                            $psi.RedirectStandardInput = $true
+                            $psi.RedirectStandardOutput = $true
+                            $psi.RedirectStandardError = $true
 
-                            if ($LASTEXITCODE -ne 0) {
-                                throw "Docker Hub login failed"
+                            $proc = New-Object System.Diagnostics.Process
+                            $proc.StartInfo = $psi
+
+                            [void]$proc.Start()
+
+                            $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+                            $stderrTask = $proc.StandardError.ReadToEndAsync()
+
+                            $proc.StandardInput.WriteLine($env:DOCKER_PASS)
+                            $proc.StandardInput.Close()
+
+                            $proc.WaitForExit()
+
+                            $loginOutput = $stdoutTask.Result
+                            $loginError = $stderrTask.Result
+                            $loginCode = $proc.ExitCode
+
+                            if ($loginOutput) {
+                                Write-Host $loginOutput
                             }
+
+                            if ($loginCode -ne 0) {
+                                if ($loginError) {
+                                    Write-Host $loginError
+                                }
+
+                                throw "Docker Hub login failed with exit code $loginCode."
+                            }
+
+                            Write-Host "Docker Hub login successful."
 
                             docker push "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
 
                             if ($LASTEXITCODE -ne 0) {
-                                throw "Failed to push versioned image"
+                                throw "Versioned image push failed."
                             }
 
                             docker push "$env:IMAGE_NAME`:latest"
 
                             if ($LASTEXITCODE -ne 0) {
-                                throw "Failed to push latest image"
+                                throw "Latest image push failed."
                             }
 
-                            Write-Host "Docker images pushed successfully"
+                            Write-Host "Both images pushed successfully."
                         }
                         finally {
                             docker logout 2>$null | Out-Null
@@ -213,7 +254,7 @@ pipeline {
                         kubectl apply -f deployment.yaml
 
                         if ($LASTEXITCODE -ne 0) {
-                            throw "Kubernetes apply failed"
+                            throw "Kubernetes apply failed."
                         }
 
                         $newImage = "$env:IMAGE_NAME`:$env:BUILD_NUMBER"
@@ -223,7 +264,7 @@ pipeline {
                             "$env:K8S_CONTAINER=$newImage"
 
                         if ($LASTEXITCODE -ne 0) {
-                            throw "Kubernetes image update failed"
+                            throw "Kubernetes image update failed."
                         }
 
                         kubectl rollout status `
@@ -231,7 +272,7 @@ pipeline {
                             --timeout=120s
 
                         if ($LASTEXITCODE -ne 0) {
-                            throw "Kubernetes rollout failed"
+                            throw "Kubernetes rollout failed."
                         }
 
                         kubectl get deployments
@@ -245,15 +286,15 @@ pipeline {
 
     post {
         success {
-            echo 'SUCCESS: E-Waste pipeline completed successfully.'
+            echo 'SUCCESS: E-Waste Portal pipeline completed.'
         }
 
         failure {
-            echo 'FAILED: Check the stage error in Console Output.'
+            echo 'FAILED: Check the first error in Console Output.'
         }
 
         always {
-            echo 'E-Waste pipeline finished.'
+            echo 'E-Waste Portal pipeline finished.'
         }
     }
 }
