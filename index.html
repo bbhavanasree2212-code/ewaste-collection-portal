@@ -5,163 +5,452 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>E-Waste Collection and Recycling Portal</title>
+
     <style>
-        * { box-sizing: border-box; }
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             margin: 0;
-            font-family: Arial, sans-serif;
-            background: #f2f7f4;
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f3f7f4;
             color: #24352b;
+            line-height: 1.6;
         }
+
         header {
             background: #176b45;
             color: white;
-            padding: 28px 18px;
+            padding: 30px 20px;
             text-align: center;
         }
-        header h1 { margin: 0 0 10px; }
+
+        header h1 {
+            margin: 0 0 8px;
+            font-size: 32px;
+        }
+
+        header p {
+            margin: 0;
+        }
+
         nav {
             background: #104d32;
             padding: 12px;
             text-align: center;
         }
+
         nav a {
             color: white;
             text-decoration: none;
             margin: 0 12px;
+            font-weight: bold;
         }
+
+        nav a:hover {
+            text-decoration: underline;
+        }
+
         main {
-            max-width: 1100px;
+            max-width: 1200px;
             margin: auto;
-            padding: 22px;
+            padding: 24px;
         }
-        .notice {
+
+        section {
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            color: #176b45;
+            margin-top: 0;
+        }
+
+        .welcome {
             background: #e0f2e7;
             border-left: 5px solid #238653;
-            padding: 16px;
-            border-radius: 6px;
+            padding: 20px;
+            border-radius: 8px;
         }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 16px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px #00000012;
+            border-top: 4px solid #238653;
+        }
+
+        .stat-card h3 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .stat-number {
+            font-size: 34px;
+            font-weight: bold;
+            color: #176b45;
+            margin: 8px 0;
+        }
+
         .centres {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 18px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 20px;
         }
+
         .card {
             background: white;
-            padding: 18px;
+            padding: 20px;
             border-radius: 10px;
             box-shadow: 0 2px 8px #00000012;
         }
-        .card h3 { color: #176b45; margin-top: 0; }
+
+        .card h3 {
+            color: #176b45;
+            margin-top: 0;
+        }
+
         .status {
             display: inline-block;
+            padding: 5px 11px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .collected {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+
+        .awaiting {
             background: #fff0c2;
             color: #765300;
-            padding: 5px 9px;
-            border-radius: 15px;
-            font-size: 13px;
         }
-        section { margin-bottom: 28px; }
-        footer {
-            text-align: center;
-            padding: 18px;
-            background: #104d32;
+
+        .recycling {
+            background: #ffedd5;
+            color: #9a3412;
+        }
+
+        .recycled {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .schedule-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .schedule-table th,
+        .schedule-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8e4;
+        }
+
+        .schedule-table th {
+            background: #176b45;
             color: white;
         }
+
+        .instructions {
+            background: white;
+            padding: 22px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px #00000012;
+        }
+
+        .announcement {
+            background: #e0f2e7;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 5px solid #238653;
+        }
+
+        footer {
+            background: #104d32;
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+
+        @media (max-width: 800px) {
+            .dashboard {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .centres {
+                grid-template-columns: 1fr;
+            }
+        }
+
         @media (max-width: 500px) {
-            nav a { display: inline-block; margin: 6px; }
+            header h1 {
+                font-size: 25px;
+            }
+
+            nav a {
+                display: inline-block;
+                margin: 5px 8px;
+            }
+
+            main {
+                padding: 14px;
+            }
+
+            .schedule-table {
+                font-size: 13px;
+            }
+
+            .schedule-table th,
+            .schedule-table td {
+                padding: 8px;
+            }
         }
     </style>
 </head>
+
 <body>
-<header>
-    <h1>♻️ E-Waste Collection and Recycling Portal</h1>
-    <p>Dispose responsibly. Recycle safely. Protect our planet.</p>
-</header>
+    <header>
+        <h1>♻️ E-Waste Collection and Recycling Portal</h1>
+        <p>Dispose responsibly. Recycle safely. Protect our planet.</p>
+    </header>
 
-<nav>
-    <a href="#centres">Collection Centres</a>
-    <a href="#instructions">Recycling Instructions</a>
-    <a href="#announcements">Announcements</a>
-</nav>
+    <nav>
+        <a href="#dashboard">Dashboard</a>
+        <a href="#centres">Collection Centres</a>
+        <a href="#schedule">Collection Schedule</a>
+        <a href="#instructions">Recycling Instructions</a>
+        <a href="#announcements">Announcements</a>
+    </nav>
 
-<main>
-    <section class="notice">
-        <h2>Welcome to the E-Waste Portal</h2>
-        <p>Find a collection centre, check accepted electronic devices,
-        and learn how your e-waste is processed responsibly.</p>
-    </section>
+    <main>
+        <section class="welcome">
+            <h2>Welcome to the E-Waste Portal</h2>
+            <p>
+                Find electronic waste collection centres, check accepted
+                device categories, view collection schedules, and learn
+                how electronic waste is processed responsibly.
+            </p>
+        </section>
 
-    <section id="centres">
-        <h2>Collection Centres</h2>
-        <div class="centres">
-            <article class="card">
-                <h3>Green Earth Recycling Centre</h3>
-                <p><strong>Location:</strong> Anna Nagar, Chennai</p>
-                <p><strong>Accepted:</strong> Mobile phones, laptops, batteries</p>
-                <p><strong>Schedule:</strong> Monday–Saturday, 9 AM–5 PM</p>
-                <p><strong>Instructions:</strong> Back up and erase personal data.</p>
-                <span class="status">Awaiting Processing</span>
-            </article>
+        <section id="dashboard">
+            <h2>E-Waste Processing Status Dashboard</h2>
+            <p>Sample processing figures for demonstration purposes.</p>
 
-            <article class="card">
-                <h3>EcoTech Collection Hub</h3>
-                <p><strong>Location:</strong> T. Nagar, Chennai</p>
-                <p><strong>Accepted:</strong> Televisions, monitors, computers</p>
-                <p><strong>Schedule:</strong> Monday–Friday, 10 AM–4 PM</p>
-                <p><strong>Instructions:</strong> Keep screens protected during transport.</p>
-                <span class="status">Under Recycling</span>
-            </article>
+            <div class="dashboard">
+                <article class="stat-card">
+                    <h3>Items Collected</h3>
+                    <p class="stat-number">250</p>
+                    <span class="status collected">Collected</span>
+                </article>
 
-            <article class="card">
-                <h3>City E-Waste Centre</h3>
-                <p><strong>Location:</strong> Velachery, Chennai</p>
-                <p><strong>Accepted:</strong> Phones, chargers, cables, batteries</p>
-                <p><strong>Schedule:</strong> Tuesday–Sunday, 9 AM–6 PM</p>
-                <p><strong>Instructions:</strong> Separate loose batteries when safe.</p>
-                <span class="status">Successfully Recycled</span>
-            </article>
+                <article class="stat-card">
+                    <h3>Awaiting Processing</h3>
+                    <p class="stat-number">45</p>
+                    <span class="status awaiting">Awaiting</span>
+                </article>
 
-            <article class="card">
-                <h3>Renew Electronics Depot</h3>
-                <p><strong>Location:</strong> Tambaram, Chennai</p>
-                <p><strong>Accepted:</strong> Laptops, printers, keyboards, mice</p>
-                <p><strong>Schedule:</strong> Monday–Saturday, 8 AM–4 PM</p>
-                <p><strong>Instructions:</strong> Remove memory cards and accessories.</p>
-                <span class="status">Collected</span>
-            </article>
+                <article class="stat-card">
+                    <h3>Under Recycling</h3>
+                    <p class="stat-number">80</p>
+                    <span class="status recycling">In Progress</span>
+                </article>
 
-            <article class="card">
-                <h3>Future Green Recycling Point</h3>
-                <p><strong>Location:</strong> Adyar, Chennai</p>
-                <p><strong>Accepted:</strong> Televisions, audio devices, computers</p>
-                <p><strong>Schedule:</strong> Wednesday–Sunday, 10 AM–5 PM</p>
-                <p><strong>Instructions:</strong> Do not dismantle electronic devices at home.</p>
-                <span class="status">Awaiting Processing</span>
-            </article>
-        </div>
-    </section>
+                <article class="stat-card">
+                    <h3>Successfully Recycled</h3>
+                    <p class="stat-number">125</p>
+                    <span class="status recycled">Completed</span>
+                </article>
+            </div>
+        </section>
 
-    <section id="instructions" class="card">
-        <h2>Recycling Instructions</h2>
-        <ol>
-            <li>Back up your files and remove personal data from devices.</li>
-            <li>Keep batteries separate where safe; never place damaged batteries in regular bins.</li>
-            <li>Do not dismantle, burn, or break electronic equipment.</li>
-            <li>Deliver items to an authorized collection or recycling centre.</li>
-            <li>Keep your collection receipt to track processing status.</li>
-        </ol>
-    </section>
+        <section id="centres">
+            <h2>Electronic Waste Collection Centres</h2>
 
-    <section id="announcements" class="notice">
-        <h2>Collection Announcements</h2>
-        <p>Residents can visit the listed centres during their published
-        schedules. Check with your local centre before dropping off large items.</p>
-    </section>
-</main>
+            <div class="centres">
+                <article class="card">
+                    <h3>1. Green Earth Recycling Centre</h3>
+                    <p><strong>Location:</strong> Anna Nagar, Chennai</p>
+                    <p><strong>Accepted devices:</strong> Mobile phones,
+                        laptops, batteries and chargers.</p>
+                    <p><strong>Schedule:</strong> Monday–Saturday,
+                        9:00 AM–5:00 PM</p>
+                    <p><strong>Instructions:</strong> Back up your files
+                        and erase personal data before disposal.</p>
+                    <p><strong>Processing status:</strong>
+                        <span class="status awaiting">Awaiting Processing</span>
+                    </p>
+                </article>
 
-<footer>
-    <p>© 2026 E-Waste Collection and Recycling Portal | Recycle for a Greener Future</p>
-</footer>
+                <article class="card">
+                    <h3>2. EcoTech Collection Hub</h3>
+                    <p><strong>Location:</strong> T. Nagar, Chennai</p>
+                    <p><strong>Accepted devices:</strong> Televisions,
+                        monitors, desktop computers and printers.</p>
+                    <p><strong>Schedule:</strong> Monday–Friday,
+                        10:00 AM–4:00 PM</p>
+                    <p><strong>Instructions:</strong> Protect screens
+                        during transport. Do not dismantle devices.</p>
+                    <p><strong>Processing status:</strong>
+                        <span class="status recycling">Under Recycling</span>
+                    </p>
+                </article>
+
+                <article class="card">
+                    <h3>3. City E-Waste Centre</h3>
+                    <p><strong>Location:</strong> Velachery, Chennai</p>
+                    <p><strong>Accepted devices:</strong> Mobile phones,
+                        cables, chargers and small electronics.</p>
+                    <p><strong>Schedule:</strong> Tuesday–Sunday,
+                        9:00 AM–6:00 PM</p>
+                    <p><strong>Instructions:</strong> Keep loose batteries
+                        separate where safe. Never dispose of them in
+                        regular household waste.</p>
+                    <p><strong>Processing status:</strong>
+                        <span class="status recycled">Successfully Recycled</span>
+                    </p>
+                </article>
+
+                <article class="card">
+                    <h3>4. Renew Electronics Depot</h3>
+                    <p><strong>Location:</strong> Tambaram, Chennai</p>
+                    <p><strong>Accepted devices:</strong> Laptops,
+                        keyboards, mice, routers and printers.</p>
+                    <p><strong>Schedule:</strong> Monday–Saturday,
+                        8:00 AM–4:00 PM</p>
+                    <p><strong>Instructions:</strong> Remove memory cards
+                        and accessories. Erase stored personal information.</p>
+                    <p><strong>Processing status:</strong>
+                        <span class="status collected">Collected</span>
+                    </p>
+                </article>
+
+                <article class="card">
+                    <h3>5. Future Green Recycling Point</h3>
+                    <p><strong>Location:</strong> Adyar, Chennai</p>
+                    <p><strong>Accepted devices:</strong> Televisions,
+                        audio equipment, computers and batteries.</p>
+                    <p><strong>Schedule:</strong> Wednesday–Sunday,
+                        10:00 AM–5:00 PM</p>
+                    <p><strong>Instructions:</strong> Do not break,
+                        burn or dismantle electronic equipment at home.</p>
+                    <p><strong>Processing status:</strong>
+                        <span class="status awaiting">Awaiting Processing</span>
+                    </p>
+                </article>
+            </div>
+        </section>
+
+        <section id="schedule">
+            <h2>Collection Schedule and Administrator Updates</h2>
+            <p>
+                The following is sample schedule information. Administrators
+                can publish revised timings by updating this section in the
+                application source and committing the change to GitHub.
+            </p>
+
+            <table class="schedule-table">
+                <thead>
+                    <tr>
+                        <th>Collection Centre</th>
+                        <th>Collection Days</th>
+                        <th>Timings</th>
+                        <th>Update</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Green Earth Recycling Centre</td>
+                        <td>Monday–Saturday</td>
+                        <td>9 AM–5 PM</td>
+                        <td>Regular schedule</td>
+                    </tr>
+                    <tr>
+                        <td>EcoTech Collection Hub</td>
+                        <td>Monday–Friday</td>
+                        <td>10 AM–4 PM</td>
+                        <td>Regular schedule</td>
+                    </tr>
+                    <tr>
+                        <td>City E-Waste Centre</td>
+                        <td>Tuesday–Sunday</td>
+                        <td>9 AM–6 PM</td>
+                        <td>Regular schedule</td>
+                    </tr>
+                    <tr>
+                        <td>Renew Electronics Depot</td>
+                        <td>Monday–Saturday</td>
+                        <td>8 AM–4 PM</td>
+                        <td>Regular schedule</td>
+                    </tr>
+                    <tr>
+                        <td>Future Green Recycling Point</td>
+                        <td>Wednesday–Sunday</td>
+                        <td>10 AM–5 PM</td>
+                        <td>Regular schedule</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="announcement" style="margin-top: 18px;">
+                <h3>Latest Collection Update</h3>
+                <p><strong>Notice:</strong> Residents should check the
+                    published schedule before visiting a collection centre.
+                    Contact the centre in advance for large or bulky devices.</p>
+                <p><strong>Last updated:</strong> 22 October 2026</p>
+            </div>
+        </section>
+
+        <section id="instructions" class="instructions">
+            <h2>Safe Recycling Instructions</h2>
+            <ol>
+                <li>Back up important files and erase personal data
+                    from phones, computers and storage devices.</li>
+                <li>Remove batteries only when they are designed to be
+                    removed safely. Do not handle damaged or swollen batteries.</li>
+                <li>Never burn, break or dismantle electronic devices
+                    at home.</li>
+                <li>Keep electronic waste separate from regular household
+                    rubbish.</li>
+                <li>Take devices to an authorized collection or recycling
+                    centre and follow its instructions.</li>
+                <li>Keep the collection receipt or reference number to
+                    help track processing status.</li>
+            </ol>
+        </section>
+
+        <section id="announcements" class="announcement">
+            <h2>City Recycling Announcements</h2>
+            <p>
+                The city encourages residents to recycle unwanted electronics
+                responsibly. Collection schedules and sample processing
+                information should be reviewed before visiting a centre.
+            </p>
+            <p>
+                <strong>Reminder:</strong> The centre records and dashboard
+                figures displayed here are sample data for this demonstration,
+                not live municipal records.
+            </p>
+        </section>
+    </main>
+
+    <footer>
+        <p>© 2026 E-Waste Collection and Recycling Portal</p>
+        <p>Recycle Responsibly — Build a Greener City</p>
+    </footer>
 </body>
 </html>
