@@ -1,0 +1,167 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Waste Collection and Recycling Portal</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f2f7f4;
+            color: #24352b;
+        }
+        header {
+            background: #176b45;
+            color: white;
+            padding: 28px 18px;
+            text-align: center;
+        }
+        header h1 { margin: 0 0 10px; }
+        nav {
+            background: #104d32;
+            padding: 12px;
+            text-align: center;
+        }
+        nav a {
+            color: white;
+            text-decoration: none;
+            margin: 0 12px;
+        }
+        main {
+            max-width: 1100px;
+            margin: auto;
+            padding: 22px;
+        }
+        .notice {
+            background: #e0f2e7;
+            border-left: 5px solid #238653;
+            padding: 16px;
+            border-radius: 6px;
+        }
+        .centres {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 18px;
+        }
+        .card {
+            background: white;
+            padding: 18px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px #00000012;
+        }
+        .card h3 { color: #176b45; margin-top: 0; }
+        .status {
+            display: inline-block;
+            background: #fff0c2;
+            color: #765300;
+            padding: 5px 9px;
+            border-radius: 15px;
+            font-size: 13px;
+        }
+        section { margin-bottom: 28px; }
+        footer {
+            text-align: center;
+            padding: 18px;
+            background: #104d32;
+            color: white;
+        }
+        @media (max-width: 500px) {
+            nav a { display: inline-block; margin: 6px; }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>♻️ E-Waste Collection and Recycling Portal</h1>
+    <p>Dispose responsibly. Recycle safely. Protect our planet.</p>
+</header>
+
+<nav>
+    <a href="#centres">Collection Centres</a>
+    <a href="#instructions">Recycling Instructions</a>
+    <a href="#announcements">Announcements</a>
+</nav>
+
+<main>
+    <section class="notice">
+        <h2>Welcome to the E-Waste Portal</h2>
+        <p>Find a collection centre, check accepted electronic devices,
+        and learn how your e-waste is processed responsibly.</p>
+    </section>
+
+    <section id="centres">
+        <h2>Collection Centres</h2>
+        <div class="centres">
+            <article class="card">
+                <h3>Green Earth Recycling Centre</h3>
+                <p><strong>Location:</strong> Anna Nagar, Chennai</p>
+                <p><strong>Accepted:</strong> Mobile phones, laptops, batteries</p>
+                <p><strong>Schedule:</strong> Monday–Saturday, 9 AM–5 PM</p>
+                <p><strong>Instructions:</strong> Back up and erase personal data.</p>
+                <span class="status">Awaiting Processing</span>
+            </article>
+
+            <article class="card">
+                <h3>EcoTech Collection Hub</h3>
+                <p><strong>Location:</strong> T. Nagar, Chennai</p>
+                <p><strong>Accepted:</strong> Televisions, monitors, computers</p>
+                <p><strong>Schedule:</strong> Monday–Friday, 10 AM–4 PM</p>
+                <p><strong>Instructions:</strong> Keep screens protected during transport.</p>
+                <span class="status">Under Recycling</span>
+            </article>
+
+            <article class="card">
+                <h3>City E-Waste Centre</h3>
+                <p><strong>Location:</strong> Velachery, Chennai</p>
+                <p><strong>Accepted:</strong> Phones, chargers, cables, batteries</p>
+                <p><strong>Schedule:</strong> Tuesday–Sunday, 9 AM–6 PM</p>
+                <p><strong>Instructions:</strong> Separate loose batteries when safe.</p>
+                <span class="status">Successfully Recycled</span>
+            </article>
+
+            <article class="card">
+                <h3>Renew Electronics Depot</h3>
+                <p><strong>Location:</strong> Tambaram, Chennai</p>
+                <p><strong>Accepted:</strong> Laptops, printers, keyboards, mice</p>
+                <p><strong>Schedule:</strong> Monday–Saturday, 8 AM–4 PM</p>
+                <p><strong>Instructions:</strong> Remove memory cards and accessories.</p>
+                <span class="status">Collected</span>
+            </article>
+
+            <article class="card">
+                <h3>Future Green Recycling Point</h3>
+                <p><strong>Location:</strong> Adyar, Chennai</p>
+                <p><strong>Accepted:</strong> Televisions, audio devices, computers</p>
+                <p><strong>Schedule:</strong> Wednesday–Sunday, 10 AM–5 PM</p>
+                <p><strong>Instructions:</strong> Do not dismantle electronic devices at home.</p>
+                <span class="status">Awaiting Processing</span>
+            </article>
+        </div>
+    </section>
+
+    <section id="instructions" class="card">
+        <h2>Recycling Instructions</h2>
+        <ol>
+            <li>Back up your files and remove personal data from devices.</li>
+            <li>Keep batteries separate where safe; never place damaged batteries in regular bins.</li>
+            <li>Do not dismantle, burn, or break electronic equipment.</li>
+            <li>Deliver items to an authorized collection or recycling centre.</li>
+            <li>Keep your collection receipt to track processing status.</li>
+        </ol>
+    </section>
+
+    <section id="announcements" class="notice">
+        <h2>Collection Announcements</h2>
+        <p>Residents can visit the listed centres during their published
+        schedules. Check with your local centre before dropping off large items.</p>
+    </section>
+</main>
+
+<footer>
+    <p>© 2026 E-Waste Collection and Recycling Portal | Recycle for a Greener Future</p>
+</footer>
+</body>
+</html>
